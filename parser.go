@@ -292,10 +292,11 @@ func getBlockFields(node *html.Node, currentBlock string) (fields Fields) {
 			desc := getNodeText(tableCols[2])
 
 			fields[name] = &Field{
-				Name:        name,
-				Description: desc,
-				Type:        correctType(getNodeText(tableCols[1])),
-				IsRequired:  !strings.HasPrefix(desc, "Optional"),
+				Name:           name,
+				Description:    desc,
+				Type:           correctType(getNodeText(tableCols[1])),
+				IsRequired:     !strings.HasPrefix(desc, "Optional"),
+				IsMediaContent: findNextNode(tableCols[2], &findMediaContent) != nil,
 			}
 		} else {
 			log.Fatalln("Unexpected number of columns at fields table")

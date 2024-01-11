@@ -46,20 +46,23 @@ func (r *{{.Type}}) GetValues() (values map[string]interface{}, err error) {
 	values = make(map[string]interface{})
 
 	{{range $k, $f := .Fields -}}
-		{{if len $f.Variants}}
+		{{if not $f.IsRequired -}}
+			if r.{{$f.Name}} != nil {
+		{{end -}}
+		{{if len $f.Variants -}}
 			switch value := r.{{$f.Name}}.(type) {
 			{{range $v := $f.Variants -}}
 				{{if eq (index $v 0).Type "string" -}}
-					case {{if not $f.IsRequired}}*{{end}}string:
-					values["{{$k}}"] = {{if not $f.IsRequired}}*{{end}}value
+					case string:
+					values["{{$k}}"] = value
 				{{else if eq (index $v 0).Type "int64" -}}
-					case {{if not $f.IsRequired}}*{{end}}int64:
-					values["{{$k}}"] = strconv.FormatInt({{if not $f.IsRequired}}*{{end}}value, 10)
+					case int64:
+					values["{{$k}}"] = strconv.FormatInt(value, 10)
 				{{else if eq (index $v 0).Type "float64" -}}
-					case {{if not $f.IsRequired}}*{{end}}float64:
-					values["{{$k}}"] = strconv.FormatFloat({{if not $f.IsRequired}}*{{end}}value, 'f', -1, 64)
+					case float64:
+					values["{{$k}}"] = strconv.FormatFloat(value, 'f', -1, 64)
 				{{else if eq (index $v 0).Type "bool" -}}
-					case {{if not $f.IsRequired}}*{{end}}bool:
+					case bool:
 					if value {
 						values["{{$k}}"] = "1"
 					} else {
@@ -69,29 +72,20 @@ func (r *{{.Type}}) GetValues() (values map[string]interface{}, err error) {
 					case io.Reader:
 					values["{{$k}}"] = value
 				{{else if or (index $v 0).IsObject (index $v 0).IsArray -}}
-					case {{range $index, $vv := $v}}{{if $index}}, {{end}}{{if not $f.IsRequired}}*{{end}}{{$vv.Type}}{{end}}:
-					{{if not $f.IsRequired -}}
-						if value != nil {
-					{{end -}}
+					case {{range $index, $vv := $v}}{{if $index}}, {{end}}{{$vv.Type}}{{end}}:
 					var data []byte
 					if data, err = json.Marshal(value); err != nil {
 						return
 					}
 
 					values["{{$k}}"] = string(data)
-					{{if not $f.IsRequired -}}
-						}
-					{{end -}}
 				{{end -}}
 			{{end -}}
 			default:
 				err = errors.New("invalid {{$k}} field type")
 				return
 			}
-		{{else}}
-			{{if not $f.IsRequired -}}
-				if r.{{$f.Name}} != nil {
-			{{end -}}
+		{{else -}}
 			{{if eq $f.Type "string" -}}
 				values["{{$k}}"] = {{if not $f.IsRequired}}*{{end}}r.{{$f.Name}}
 			{{else if eq $f.Type "int64" -}}
@@ -104,7 +98,7 @@ func (r *{{.Type}}) GetValues() (values map[string]interface{}, err error) {
 				} else {
 					values["{{$k}}"] = "0"
 				}
-			{{else if $f.IsInputFile}}
+			{{else if $f.IsInputFile -}}
 				values["{{$k}}"] = r.{{$f.Name}}
 			{{else if or $f.IsObject $f.IsArray -}}
 				var data{{$f.Name}} []byte
@@ -114,10 +108,10 @@ func (r *{{.Type}}) GetValues() (values map[string]interface{}, err error) {
 
 				values["{{$k}}"] = string(data{{$f.Name}})
 			{{end -}}
-			{{if not $f.IsRequired -}}
-				}
-			{{end -}}
 		{{end -}}
+		{{if not $f.IsRequired -}}
+			}
+		{{end}}
 	{{end -}}
     {{end}}
 
