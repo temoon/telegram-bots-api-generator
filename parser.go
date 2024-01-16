@@ -13,80 +13,46 @@ import (
 
 const TelegramBotsApiUrl = "https://core.telegram.org/bots/api"
 
-const BlockNone = ""
 const BlockMethods = "methods"
 const BlockTypes = "types"
 
-const InputFileType = "InputFile"
-const IoStreamType = "input"
-
-var LongTypes = map[string]map[string]bool{}
-
 type Types map[string]*Type
 
-func (t Types) GetFilteredNames() (names []string) {
-	names = make([]string, 0, len(t))
-	for name, value := range t {
-		if name == InputFileType || len(value.Subtypes) != 0 {
+func (t Types) GetFilteredKeys() (keys []string) {
+	keys = make([]string, 0, len(t))
+	for key, value := range t {
+		if isInputFileType(key) || len(value.Subtypes) != 0 {
 			continue
 		}
 
-		names = append(names, name)
+		keys = append(keys, key)
 	}
 
-	sort.Strings(names)
+	sort.Strings(keys)
 
 	return
 }
 
 type Type struct {
-	Name        string
-	Description string
-	Anchor      string
-	Subtypes    []string
-	Fields      Fields
+	Name     string
+	Subtypes []string
+	Fields   Fields
 }
 
 type Methods map[string]*Method
 
 type Method struct {
-	Name        string
-	Description string
-	Anchor      string
-	Returns     string
-	Fields      Fields
+	Key        string
+	ReturnType string
+	Fields     Fields
 }
 
 type Fields map[string]*Field
 
-func (f Fields) HasMediaContent() bool {
-	for _, field := range f {
-		if field.IsMediaContent {
-			return true
-		}
-	}
-
-	return false
-}
-
 type Field struct {
-	Name           string
-	Description    string
-	Type           string
-	IsRequired     bool
-	IsMediaContent bool
-}
-
-func (f *Field) IsArray() bool {
-	return strings.HasPrefix(f.Type, "[]")
-}
-
-func (f *Field) IsObject() bool {
-	return unicode.IsUpper(rune(f.Type[0]))
-}
-
-func (f *Field) IsInputFile() bool {
-	return f.Type == IoStreamType
+	Key        string
+	Type       string
+	IsRequired bool
 }
 
 func fetch() (doc *html.Node, err error) {
@@ -138,13 +104,14 @@ func parse(doc *html.Node) (methods Methods, types Types, err error) {
 	}
 
 	var currentBlock, currentName string
+	var desc string
 	for node := doc.FirstChild; node != nil; node = node.NextSibling {
 		if node.Type != html.ElementNode {
 			continue
 		}
 
 		if node.Data == "h3" || node.Data == "hr" {
-			currentBlock = BlockNone
+			currentBlock = ""
 			currentName = ""
 		}
 
@@ -152,13 +119,12 @@ func parse(doc *html.Node) (methods Methods, types Types, err error) {
 			findAnchor.ResetCounters()
 			anchor := findNextNode(node, &findAnchor)
 			if anchor == nil {
-				currentBlock = BlockNone
+				currentBlock = ""
 				currentName = ""
 
 				continue
 			}
 
-			attrs := getNodeAttributes(anchor)
 			currentName = getNodeText(node)
 
 			if unicode.IsUpper(rune(currentName[0])) {
@@ -166,35 +132,28 @@ func parse(doc *html.Node) (methods Methods, types Types, err error) {
 
 				types[currentName] = &Type{
 					Name:     currentName,
-					Anchor:   attrs["href"],
 					Subtypes: make([]string, 0),
 					Fields:   make(Fields),
 				}
 			} else {
 				currentBlock = BlockMethods
+				desc = ""
 
 				methods[currentName] = &Method{
-					Name:   currentName,
-					Anchor: attrs["href"],
+					Key:    currentName,
 					Fields: make(Fields),
 				}
 			}
 		}
 
-		if currentBlock == BlockNone || currentName == "" {
+		if len(currentBlock) == 0 || len(currentName) == 0 {
 			continue
 		}
 
-		if node.Data == "p" {
-			switch currentBlock {
-			case BlockMethods:
-				if m, ok := methods[currentName]; ok {
-					m.Description += getBlockDescription(node)
-				}
-			case BlockTypes:
-				if t, ok := types[currentName]; ok {
-					t.Description += getBlockDescription(node)
-				}
+		if node.Data == "p" && currentBlock == BlockMethods {
+			desc += getBlockDescription(node)
+			if m, ok := methods[currentName]; ok && len(desc) > 0 {
+				m.ReturnType = getMethodReturnType(desc)
 			}
 		}
 
@@ -215,10 +174,6 @@ func parse(doc *html.Node) (methods Methods, types Types, err error) {
 			if t, ok := types[currentName]; ok {
 				t.Subtypes = getBlockSubtypes(node)
 			}
-		}
-
-		if m, ok := methods[currentName]; currentBlock == BlockMethods && ok && m.Description != "" {
-			m.Returns = getMethodReturnType(m.Description)
 		}
 	}
 
@@ -260,43 +215,26 @@ func getBlockFields(node *html.Node, currentBlock string) (fields Fields) {
 		},
 	}
 
-	findMediaContent := FindOpts{
-		Criteria: func(node *html.Node) bool {
-			if node.Type == html.ElementNode && node.Data == "a" {
-				attrs := getNodeAttributes(node)
-				return attrs["href"] == "#sending-files"
-			}
-
-			return false
-		},
-	}
-
 	for _, row := range tableRows {
 		findColsOpts.ResetCounters()
-		findMediaContent.ResetCounters()
 
 		tableCols := findAllNodes(row, &findColsOpts)
 		if currentBlock == BlockMethods && len(tableCols) == 4 {
-			name := getNodeText(tableCols[0])
-			desc := getNodeText(tableCols[3])
+			key := getNodeText(tableCols[0])
 
-			fields[name] = &Field{
-				Name:           name,
-				Description:    desc,
-				Type:           correctType(getNodeText(tableCols[1])),
-				IsRequired:     getNodeText(tableCols[2]) == "Yes",
-				IsMediaContent: findNextNode(tableCols[3], &findMediaContent) != nil,
+			fields[key] = &Field{
+				Key:        key,
+				Type:       correctType(getNodeText(tableCols[1])),
+				IsRequired: getNodeText(tableCols[2]) == "Yes",
 			}
 		} else if currentBlock == BlockTypes && len(tableCols) == 3 {
-			name := getNodeText(tableCols[0])
+			key := getNodeText(tableCols[0])
 			desc := getNodeText(tableCols[2])
 
-			fields[name] = &Field{
-				Name:           name,
-				Description:    desc,
-				Type:           correctType(getNodeText(tableCols[1])),
-				IsRequired:     !strings.HasPrefix(desc, "Optional"),
-				IsMediaContent: findNextNode(tableCols[2], &findMediaContent) != nil,
+			fields[key] = &Field{
+				Key:        key,
+				Type:       correctType(getNodeText(tableCols[1])),
+				IsRequired: !strings.HasPrefix(desc, "Optional"),
 			}
 		} else {
 			log.Fatalln("Unexpected number of columns at fields table")
@@ -331,6 +269,13 @@ func getMethodReturnType(desc string) (returns string) {
 }
 
 func correctType(t string) string {
+	switch t {
+	case InputFileType + " or String":
+		t = InputFileType
+	case "Integer or String":
+		t = ChatIdType
+	}
+
 	var tt []string
 	if strings.HasPrefix(t, "Array of InputMediaAudio") {
 		tt = strings.Split(t, " , ")
@@ -352,15 +297,13 @@ func correctType(t string) string {
 		}
 
 		switch item {
-		case strings.ToLower(InputFileType):
-			tt[i] = IoStreamType
 		case "messages":
 			tt[i] = "Message"
 		case "boolean", "true":
 			tt[i] = "bool"
 		case "float", "float number":
 			tt[i] = "float64"
-		case "integer":
+		case "integer", "int":
 			tt[i] = "int64"
 		case "string":
 			tt[i] = "string"

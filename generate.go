@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"text/template"
-	"unicode"
 )
 
 const ApiDir = "api"
@@ -26,39 +25,64 @@ const TypesTemplate = "types.tmpl"
 const RequestFileTemplate = "request.tmpl"
 const TypesFile = "types.go"
 
-type TelegramType struct {
+//type TelegramType struct {
+//	Type   *Type
+//	Fields []TelegramTypeField
+//}
+
+//type TelegramTypeField struct {
+//	Field      *Field
+//	Key        string
+//	Name       string
+//	Type       string
+//	IsRequired bool
+//}
+
+type TypeTemplateData struct {
 	Type   *Type
-	Name   string
-	Fields []TelegramTypeField
+	Fields []*TypeFieldTemplateData
 }
 
-type TelegramTypeField struct {
-	Field      *Field
-	Key        string
-	Name       string
-	Type       string
-	IsRequired bool
+func (d *TypeTemplateData) SortFields() {
+	sort.Slice(d.Fields, func(i, j int) bool {
+		iRequired := "1"
+		if d.Fields[i].Field.IsRequired {
+			iRequired = "0"
+		}
+
+		jRequired := "1"
+		if d.Fields[j].Field.IsRequired {
+			jRequired = "0"
+		}
+
+		return iRequired+d.Fields[i].Field.Key < jRequired+d.Fields[j].Field.Key
+	})
 }
 
-type TelegramRequest struct {
-	Imports          []string
-	Method           *Method
-	Type             string
-	Fields           map[string]TelegramRequestField
-	HasMediaContent  bool
-	ResponseType     string
-	ResponseVariants []string
+type TypeFieldTemplateData struct {
+	Field *Field
+	Name  string
+	Type  string
 }
 
-type TelegramRequestField struct {
+type RequestTemplateData struct {
+	Imports              []string
+	Method               *Method
+	Name                 string
+	Fields               []*RequestFieldTemplateData
+	ResponseType         string
+	ResponseTypeVariants []string
+}
+
+type RequestFieldTemplateData struct {
+	Field       *Field
 	Name        string
 	Type        string
-	FieldType   string
-	IsRequired  bool
 	IsArray     bool
 	IsObject    bool
 	IsInputFile bool
-	Variants    [][]TelegramRequestField
+	IsChatId    bool
+	Variants    [][]*RequestFieldTemplateData
 }
 
 func main() {
@@ -101,38 +125,23 @@ func generateTypes(types Types) (err error) {
 		return
 	}
 
-	for _, name := range types.GetFilteredNames() {
-		item := types[name]
+	for _, key := range types.GetFilteredKeys() {
+		item := types[key]
 
-		fields := make([]TelegramTypeField, 0, len(item.Fields))
+		fields := make([]*TypeFieldTemplateData, 0, len(item.Fields))
 		for _, field := range item.Fields {
-			field := TelegramTypeField{
-				Key:        field.Name,
-				Name:       strcase.ToCamel(field.Name),
-				Type:       generateValueType(types, field.Type, field.IsRequired, ""),
-				IsRequired: field.IsRequired,
-			}
-
-			fields = append(fields, field)
+			fields = append(fields, &TypeFieldTemplateData{
+				Field: field,
+				Name:  strcase.ToCamel(field.Key),
+				Type:  getGoType(types, field.Type, field.IsRequired, ""),
+			})
 		}
-		sort.Slice(fields, func(i, j int) bool {
-			iRequired := "1"
-			if fields[i].IsRequired {
-				iRequired = "0"
-			}
 
-			jRequired := "1"
-			if fields[j].IsRequired {
-				jRequired = "0"
-			}
-
-			return iRequired+fields[i].Key < jRequired+fields[j].Key
-		})
-
-		data := TelegramType{
-			Name:   name,
+		data := TypeTemplateData{
+			Type:   item,
 			Fields: fields,
 		}
+		data.SortFields()
 
 		if err = tmpl.ExecuteTemplate(file, TypesTemplate, data); err != nil {
 			return
@@ -168,119 +177,126 @@ func generateRequests(types Types, methods Methods) (err error) {
 
 func generateRequestFile(tmpl *template.Template, types Types, method *Method) (err error) {
 	var file *os.File
-	if file, err = os.Create(filepath.Join(ApiDir, RequestsDir, strcase.ToSnake(method.Name)+".go")); err != nil {
+	if file, err = os.Create(filepath.Join(ApiDir, RequestsDir, strcase.ToSnake(method.Key)+".go")); err != nil {
 		return
 	}
 	//goland:noinspection GoUnhandledErrorResult
 	defer file.Close()
 
-	imports := make(map[string]bool)
-
-	telegramRequest := TelegramRequest{
-		Method:          method,
-		Type:            cases.Title(language.English, cases.NoLower).String(method.Name),
-		Fields:          make(map[string]TelegramRequestField),
-		HasMediaContent: method.Fields.HasMediaContent(),
-		ResponseType:    generateValueType(types, method.Returns, true, "telegram"),
+	imports := map[string]bool{
+		"io": true,
 	}
 
-	if t, ok := types[method.Returns]; ok && len(t.Subtypes) > 0 {
-		telegramRequest.ResponseVariants = make([]string, 0, len(t.Subtypes))
+	data := RequestTemplateData{
+		Method:       method,
+		Name:         cases.Title(language.English, cases.NoLower).String(method.Key),
+		ResponseType: getGoType(types, method.ReturnType, true, "telegram"),
+	}
+
+	if t, ok := types[method.ReturnType]; ok && len(t.Subtypes) > 0 {
+		data.ResponseTypeVariants = make([]string, 0, len(t.Subtypes))
 		for _, subtype := range t.Subtypes {
-			telegramRequest.ResponseVariants = append(telegramRequest.ResponseVariants, generateValueType(types, subtype, false, "telegram"))
+			data.ResponseTypeVariants = append(data.ResponseTypeVariants, getGoType(types, subtype, false, "telegram"))
 		}
 
 		imports["errors"] = true
 	}
 
-	for name, field := range method.Fields {
+	fields := make([]*RequestFieldTemplateData, 0, len(method.Fields))
+	for _, field := range method.Fields {
 		subtypes := strings.Split(field.Type, " or ")
-		variantSimples := make([]TelegramRequestField, 0, len(subtypes))
-		variantObjects := make([]TelegramRequestField, 0, len(subtypes))
+		variantSimples := make([]*RequestFieldTemplateData, 0, len(subtypes))
+		variantObjects := make([]*RequestFieldTemplateData, 0, len(subtypes))
 		if len(subtypes) > 1 {
 			for _, subtype := range subtypes {
-				isArray := strings.HasPrefix(subtype, "[]")
-				isObject := unicode.IsUpper(rune(subtype[0]))
-				isInputFile := subtype == IoStreamType
+				isArray := isArrayType(subtype)
+				isObject := isObjectType(subtype)
+				isInputFile := isInputFileType(subtype)
+				isChatId := isChatIdType(subtype)
 
 				if subtype == "int64" || subtype == "float64" {
 					imports["strconv"] = true
-				} else if isInputFile {
-					imports["io"] = true
-				} else if isObject || isArray {
+				} else if isObject && !isInputFile || isArray {
 					imports["encoding/json"] = true
 				}
 
-				variant := TelegramRequestField{
-					Type:        generateValueType(types, subtype, true, "telegram"),
+				requestFieldVariant := RequestFieldTemplateData{
+					Type:        getGoType(types, subtype, true, "telegram"),
 					IsArray:     isArray,
 					IsObject:    isObject,
 					IsInputFile: isInputFile,
+					IsChatId:    isChatId,
 				}
 
 				if isObject || isArray {
-					variantObjects = append(variantObjects, variant)
+					variantObjects = append(variantObjects, &requestFieldVariant)
 				} else {
-					variantSimples = append(variantSimples, variant)
+					variantSimples = append(variantSimples, &requestFieldVariant)
 				}
 			}
 
 			imports["errors"] = true
 		}
 
-		variants := make([][]TelegramRequestField, 0, len(variantSimples)+1)
+		variants := make([][]*RequestFieldTemplateData, 0, len(variantSimples)+1)
 		for _, variant := range variantSimples {
-			variants = append(variants, []TelegramRequestField{variant})
+			variants = append(variants, []*RequestFieldTemplateData{variant})
 		}
 		if len(variantObjects) > 0 {
 			variants = append(variants, variantObjects)
 		}
 
-		telegramRequestField := TelegramRequestField{
-			Name:        strcase.ToCamel(name),
-			Type:        field.Type,
-			FieldType:   generateValueType(types, field.Type, field.IsRequired, "telegram"),
-			IsRequired:  field.IsRequired,
-			IsArray:     field.IsArray(),
-			IsObject:    field.IsObject(),
-			IsInputFile: field.IsInputFile(),
-			Variants:    variants,
-		}
+		isArray := isArrayType(field.Type)
+		isObject := isObjectType(field.Type)
+		isInputFile := isInputFileType(field.Type)
+		isChatId := isChatIdType(field.Type)
 
 		if field.Type == "int64" || field.Type == "float64" {
 			imports["strconv"] = true
-		} else if field.IsObject() || field.IsArray() {
+		} else if isObject && !isInputFile || isArray {
 			imports["encoding/json"] = true
-		} else if field.IsInputFile() {
-			imports["io"] = true
 		}
 
-		telegramRequest.Fields[name] = telegramRequestField
-	}
+		requestField := RequestFieldTemplateData{
+			Field:       field,
+			Name:        strcase.ToCamel(field.Key),
+			Type:        getGoType(types, field.Type, field.IsRequired, "telegram"),
+			IsArray:     isArray,
+			IsObject:    isObject,
+			IsInputFile: isInputFile,
+			IsChatId:    isChatId,
+			Variants:    variants,
+		}
 
-	telegramRequest.Imports = make([]string, 0)
-	for str := range imports {
-		telegramRequest.Imports = append(telegramRequest.Imports, str)
+		fields = append(fields, &requestField)
 	}
-	sort.Strings(telegramRequest.Imports)
+	data.Fields = fields
 
-	if err = tmpl.ExecuteTemplate(file, RequestFileTemplate, &telegramRequest); err != nil {
+	data.Imports = make([]string, 0)
+	for module := range imports {
+		data.Imports = append(data.Imports, module)
+	}
+	sort.Strings(data.Imports)
+
+	if err = tmpl.ExecuteTemplate(file, RequestFileTemplate, &data); err != nil {
 		return
 	}
 
 	return
 }
 
-func generateValueType(types Types, value string, isRequired bool, pkg string) (t string) {
-	isArray := strings.HasPrefix(value, "[]")
-	isObject := unicode.IsUpper(rune(value[0]))
-
-	isContainer := false
+func getGoType(types Types, value string, isRequired bool, pkg string) (t string) {
+	hasSubtypes := false
 	if t, ok := types[value]; ok && len(t.Subtypes) > 0 {
-		isContainer = true
+		hasSubtypes = true
 	}
 
-	if isObject && !isContainer {
+	hasVariants := len(strings.Split(value, " or ")) > 1
+
+	isArray := isArrayType(value) && !hasVariants
+	isObject := isObjectType(value) && !hasVariants
+
+	if isObject && !hasSubtypes {
 		t = value
 		if pkg != "" {
 			t = pkg + "." + t
@@ -298,7 +314,7 @@ func generateValueType(types Types, value string, isRequired bool, pkg string) (
 			}
 		default:
 			if isArray {
-				t = "[]" + generateValueType(types, value[2:], true, pkg) // len("[]") = 2
+				t = "[]" + getGoType(types, value[2:], true, pkg) // len("[]") = 2
 			} else {
 				t = "interface{}"
 			}

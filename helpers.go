@@ -3,7 +3,11 @@ package main
 import (
 	"golang.org/x/net/html"
 	"strings"
+	"unicode"
 )
+
+const InputFileType = "InputFile"
+const ChatIdType = "ChatId"
 
 type FindOpts struct {
 	level   int
@@ -103,4 +107,24 @@ func getNodeAttributes(node *html.Node) (attrs map[string]string) {
 	}
 
 	return
+}
+
+func isArrayType(t string) bool {
+	return strings.HasPrefix(t, "[]")
+}
+
+func isObjectType(t string) bool {
+	if len(t) == 0 {
+		return false
+	}
+
+	return unicode.IsUpper(rune(t[0]))
+}
+
+func isInputFileType(t string) bool {
+	return t == InputFileType
+}
+
+func isChatIdType(t string) bool {
+	return t == ChatIdType
 }
