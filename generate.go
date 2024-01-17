@@ -75,6 +75,22 @@ type RequestTemplateData struct {
 	ResponseTypeVariants []string
 }
 
+func (d *RequestTemplateData) SortFields() {
+	sort.Slice(d.Fields, func(i, j int) bool {
+		iRequired := "1"
+		if d.Fields[i].Field.IsRequired {
+			iRequired = "0"
+		}
+
+		jRequired := "1"
+		if d.Fields[j].Field.IsRequired {
+			jRequired = "0"
+		}
+
+		return iRequired+d.Fields[i].Field.Key < jRequired+d.Fields[j].Field.Key
+	})
+}
+
 type RequestFieldTemplateData struct {
 	Field       *Field
 	Name        string
@@ -349,7 +365,9 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 			}
 		}
 	}
+
 	data.Fields = fields
+	data.SortFields()
 
 	data.Imports = make([]string, 0)
 	for module := range imports {

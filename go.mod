@@ -2,7 +2,7 @@ module github.com/temoon/telegram-bots-api-generator
 
 go 1.21.4
 
-replace github.com/temoon/telegram-bots-api => ./output
+replace github.com/temoon/telegram-bots-api => ./api
 
 require (
 	github.com/iancoleman/strcase v0.2.0
