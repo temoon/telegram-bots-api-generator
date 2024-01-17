@@ -116,5 +116,59 @@ func (r *{{.Name}}) GetValues() (values map[string]interface{}, err error) {
 }
 
 func (r *{{.Name}}) GetFiles() (files map[string]io.Reader) {
+	{{if or (len .Files.Fields) (len .Files.Arrays) (len .Files.Subtypes) (len .Files.Variants) -}}
+	files = make(map[string]io.Reader)
+
+	{{range $name, $fields := .Files.Fields -}}
+		{{range $_, $field := $fields -}}
+		if {{if not $field.IsRequired}}r.{{$name}}.{{$field.Name}} != nil && {{end}}r.{{$name}}.{{$field.Name}}.HasFile() {
+			files[r.{{$name}}.{{$field.Name}}.GetFormFieldName()] = r.{{$name}}.{{$field.Name}}.GetFile()
+		}
+		{{end -}}
+	{{- end}}
+
+	{{range $name, $fields := .Files.Arrays -}}
+	for _, item := range r.{{$name}} {
+		{{range $_, $field := $fields -}}
+		if {{if not $field.IsRequired}}item.{{$field.Name}} != nil && {{end}}item.{{$field.Name}}.HasFile() {
+			files[item.{{$field.Name}}.GetFormFieldName()] = item.{{$field.Name}}.GetFile()
+		}
+		{{end -}}
+	}
+	{{- end}}
+
+	{{range $name, $subtypes := .Files.Subtypes -}}
+	switch value := r.{{$name}}.(type) {
+		{{range $_, $subtype := $subtypes -}}
+		case {{$subtype.Type}}:
+			{{range $_, $field := $subtype.Fields -}}
+			if {{if not $field.IsRequired}}value.{{$field.Name}} != nil && {{end}}value.{{$field.Name}}.HasFile() {
+				files[value.{{$field.Name}}.GetFormFieldName()] = value.{{$field.Name}}.GetFile()
+			}
+			{{end -}}
+		{{end -}}
+	}
+	{{- end}}
+
+	{{range $name, $variants := .Files.Variants -}}
+	switch value := r.{{$name}}.(type) {
+		{{range $_, $variant := $variants -}}
+		case {{$variant.Type}}:
+			{{if $variant.IsArray -}}
+			for _, item := range value {
+			{{end -}}
+			{{range $_, $field := $variant.Fields -}}
+			if {{if not $field.IsRequired}}{{if $variant.IsArray}}item{{else}}value{{end}}.{{$field.Name}} != nil && {{end}}{{if $variant.IsArray}}item{{else}}value{{end}}.{{$field.Name}}.HasFile() {
+				files[{{if $variant.IsArray}}item{{else}}value{{end}}.{{$field.Name}}.GetFormFieldName()] = {{if $variant.IsArray}}item{{else}}value{{end}}.{{$field.Name}}.GetFile()
+			}
+			{{end -}}
+			{{if $variant.IsArray -}}
+			}
+			{{end -}}
+		{{end -}}
+	}
+	{{- end}}
+	{{end -}}
+
 	return
 }

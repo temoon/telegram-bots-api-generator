@@ -215,25 +215,51 @@ func getBlockFields(node *html.Node, currentBlock string) (fields Fields) {
 		},
 	}
 
+	findSendingFiles := FindOpts{
+		Criteria: func(node *html.Node) bool {
+			if node.Type == html.ElementNode && node.Data == "a" {
+				attrs := getNodeAttributes(node)
+				return attrs["href"] == "#sending-files"
+			}
+
+			return false
+		},
+	}
+
 	for _, row := range tableRows {
 		findColsOpts.ResetCounters()
+		findSendingFiles.ResetCounters()
 
 		tableCols := findAllNodes(row, &findColsOpts)
 		if currentBlock == BlockMethods && len(tableCols) == 4 {
 			key := getNodeText(tableCols[0])
 
+			var fieldType string
+			if findNextNode(tableCols[3], &findSendingFiles) != nil {
+				fieldType = InputFileType
+			} else {
+				fieldType = correctType(getNodeText(tableCols[1]))
+			}
+
 			fields[key] = &Field{
 				Key:        key,
-				Type:       correctType(getNodeText(tableCols[1])),
+				Type:       fieldType,
 				IsRequired: getNodeText(tableCols[2]) == "Yes",
 			}
 		} else if currentBlock == BlockTypes && len(tableCols) == 3 {
 			key := getNodeText(tableCols[0])
 			desc := getNodeText(tableCols[2])
 
+			var fieldType string
+			if findNextNode(tableCols[2], &findSendingFiles) != nil {
+				fieldType = InputFileType
+			} else {
+				fieldType = correctType(getNodeText(tableCols[1]))
+			}
+
 			fields[key] = &Field{
 				Key:        key,
-				Type:       correctType(getNodeText(tableCols[1])),
+				Type:       fieldType,
 				IsRequired: !strings.HasPrefix(desc, "Optional"),
 			}
 		} else {

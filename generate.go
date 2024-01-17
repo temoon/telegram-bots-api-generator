@@ -69,7 +69,8 @@ type RequestTemplateData struct {
 	Imports              []string
 	Method               *Method
 	Name                 string
-	Fields               []*RequestFieldTemplateData
+	Fields               []RequestFieldTemplateData
+	Files                Files
 	ResponseType         string
 	ResponseTypeVariants []string
 }
@@ -82,7 +83,30 @@ type RequestFieldTemplateData struct {
 	IsObject    bool
 	IsInputFile bool
 	IsChatId    bool
-	Variants    [][]*RequestFieldTemplateData
+	Variants    [][]RequestFieldTemplateData
+}
+
+type Files struct {
+	Fields   map[string][]FileField
+	Arrays   map[string][]FileField
+	Subtypes map[string][]FileSubtype
+	Variants map[string][]FileVariants
+}
+
+type FileSubtype struct {
+	Type   string
+	Fields []FileField
+}
+
+type FileVariants struct {
+	Type    string
+	IsArray bool
+	Fields  []FileField
+}
+
+type FileField struct {
+	Name       string
+	IsRequired bool
 }
 
 func main() {
@@ -191,6 +215,13 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 		Method:       method,
 		Name:         cases.Title(language.English, cases.NoLower).String(method.Key),
 		ResponseType: getGoType(types, method.ReturnType, true, "telegram"),
+
+		Files: Files{
+			Fields:   make(map[string][]FileField),
+			Arrays:   make(map[string][]FileField),
+			Subtypes: make(map[string][]FileSubtype),
+			Variants: make(map[string][]FileVariants),
+		},
 	}
 
 	if t, ok := types[method.ReturnType]; ok && len(t.Subtypes) > 0 {
@@ -202,13 +233,13 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 		imports["errors"] = true
 	}
 
-	fields := make([]*RequestFieldTemplateData, 0, len(method.Fields))
+	fields := make([]RequestFieldTemplateData, 0, len(method.Fields))
 	for _, field := range method.Fields {
-		subtypes := strings.Split(field.Type, " or ")
-		variantSimples := make([]*RequestFieldTemplateData, 0, len(subtypes))
-		variantObjects := make([]*RequestFieldTemplateData, 0, len(subtypes))
-		if len(subtypes) > 1 {
-			for _, subtype := range subtypes {
+		typeVariants := strings.Split(field.Type, " or ")
+		variantSimples := make([]RequestFieldTemplateData, 0, len(typeVariants))
+		variantObjects := make([]RequestFieldTemplateData, 0, len(typeVariants))
+		if len(typeVariants) > 1 {
+			for _, subtype := range typeVariants {
 				isArray := isArrayType(subtype)
 				isObject := isObjectType(subtype)
 				isInputFile := isInputFileType(subtype)
@@ -216,7 +247,7 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 
 				if subtype == "int64" || subtype == "float64" {
 					imports["strconv"] = true
-				} else if isObject && !isInputFile || isArray {
+				} else if isObject && !isInputFile && !isChatId || isArray {
 					imports["encoding/json"] = true
 				}
 
@@ -229,18 +260,18 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 				}
 
 				if isObject || isArray {
-					variantObjects = append(variantObjects, &requestFieldVariant)
+					variantObjects = append(variantObjects, requestFieldVariant)
 				} else {
-					variantSimples = append(variantSimples, &requestFieldVariant)
+					variantSimples = append(variantSimples, requestFieldVariant)
 				}
 			}
 
 			imports["errors"] = true
 		}
 
-		variants := make([][]*RequestFieldTemplateData, 0, len(variantSimples)+1)
+		variants := make([][]RequestFieldTemplateData, 0, len(variantSimples)+1)
 		for _, variant := range variantSimples {
-			variants = append(variants, []*RequestFieldTemplateData{variant})
+			variants = append(variants, []RequestFieldTemplateData{variant})
 		}
 		if len(variantObjects) > 0 {
 			variants = append(variants, variantObjects)
@@ -253,7 +284,7 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 
 		if field.Type == "int64" || field.Type == "float64" {
 			imports["strconv"] = true
-		} else if isObject && !isInputFile || isArray {
+		} else if isObject && !isInputFile && !isChatId || isArray {
 			imports["encoding/json"] = true
 		}
 
@@ -268,7 +299,55 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 			Variants:    variants,
 		}
 
-		fields = append(fields, &requestField)
+		fields = append(fields, requestField)
+
+		if t, ok := types[field.Type]; ok && len(t.Subtypes) > 0 {
+			subtypes := make([]FileSubtype, 0, len(t.Subtypes))
+			for _, subtype := range t.Subtypes {
+				if inputFileFields := getInputFileFields(types[subtype].Fields); len(inputFileFields) > 0 {
+					subtypes = append(subtypes, FileSubtype{
+						Type:   getGoType(types, subtype, true, "telegram"),
+						Fields: inputFileFields,
+					})
+				}
+			}
+
+			if len(subtypes) > 0 {
+				data.Files.Subtypes[requestField.Name] = subtypes
+			}
+		} else if typeVariants = strings.Split(field.Type, " or "); len(typeVariants) > 1 {
+			vars := make([]FileVariants, 0, len(typeVariants))
+			for i, variantType := range typeVariants {
+				isArray = isArrayType(variantType)
+				if isArray {
+					variantType = variantType[2:]
+				}
+
+				if inputFileFields := getInputFileFields(types[variantType].Fields); len(inputFileFields) > 0 {
+					vars = append(vars, FileVariants{
+						Type:    getGoType(types, typeVariants[i], true, "telegram"),
+						IsArray: isArray,
+						Fields:  inputFileFields,
+					})
+				}
+			}
+
+			if len(vars) > 0 {
+				data.Files.Variants[requestField.Name] = vars
+			}
+		} else if isObject {
+			if t, ok = types[field.Type]; ok {
+				if inputFileFields := getInputFileFields(t.Fields); len(inputFileFields) > 0 {
+					data.Files.Fields[requestField.Name] = inputFileFields
+				}
+			}
+		} else if isArray {
+			if t, ok = types[field.Type[2:]]; ok { // len("[]") == 2
+				if inputFileFields := getInputFileFields(t.Fields); len(inputFileFields) > 0 {
+					data.Files.Arrays[requestField.Name] = inputFileFields
+				}
+			}
+		}
 	}
 	data.Fields = fields
 
@@ -280,6 +359,22 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 
 	if err = tmpl.ExecuteTemplate(file, RequestFileTemplate, &data); err != nil {
 		return
+	}
+
+	return
+}
+
+func getInputFileFields(fields Fields) (output []FileField) {
+	output = make([]FileField, 0)
+	for _, field := range fields {
+		if !isInputFileType(field.Type) {
+			continue
+		}
+
+		output = append(output, FileField{
+			Name:       strcase.ToCamel(field.Key),
+			IsRequired: field.IsRequired,
+		})
 	}
 
 	return
