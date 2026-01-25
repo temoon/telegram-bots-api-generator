@@ -91,10 +91,11 @@ type RequestFieldTemplateData struct {
 }
 
 type Files struct {
-	Fields   map[string][]FileField
-	Arrays   map[string][]FileField
-	Subtypes map[string][]FileSubtype
-	Variants map[string][]FileVariants
+	DirectFields []FileField
+	Fields       map[string][]FileField
+	Arrays       map[string][]FileField
+	Subtypes     map[string][]FileSubtype
+	Variants     map[string][]FileVariants
 }
 
 type FileSubtype struct {
@@ -221,10 +222,11 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 		ResponseType: getGoType(types, method.ReturnType, true, "telegram"),
 
 		Files: Files{
-			Fields:   make(map[string][]FileField),
-			Arrays:   make(map[string][]FileField),
-			Subtypes: make(map[string][]FileSubtype),
-			Variants: make(map[string][]FileVariants),
+			DirectFields: make([]FileField, 0),
+			Fields:       make(map[string][]FileField),
+			Arrays:       make(map[string][]FileField),
+			Subtypes:     make(map[string][]FileSubtype),
+			Variants:     make(map[string][]FileVariants),
 		},
 	}
 
@@ -304,6 +306,14 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 		}
 
 		fields = append(fields, requestField)
+
+		// Check if this is a direct InputFile field
+		if isInputFile {
+			data.Files.DirectFields = append(data.Files.DirectFields, FileField{
+				Name:       requestField.Name,
+				IsRequired: field.IsRequired,
+			})
+		}
 
 		if t, ok := types[field.Type]; ok && len(t.Subtypes) > 0 {
 			subtypes := make([]FileSubtype, 0, len(t.Subtypes))

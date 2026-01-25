@@ -33,9 +33,9 @@ func (r *{{.Name}}) CallWithResponse(ctx context.Context, b *telegram.Bot, respo
 }
 {{- end}}
 
-func (r *{{.Name}}) GetValues() (values map[string]interface{}, err error) {
+func (r *{{.Name}}) GetValues() (values map[string]string, err error) {
 	{{- if len .Fields -}}
-	values = make(map[string]interface{})
+	values = make(map[string]string)
 
 	{{range $_, $field := .Fields -}}
 		{{if not $field.Field.IsRequired -}}
@@ -62,7 +62,7 @@ func (r *{{.Name}}) GetValues() (values map[string]interface{}, err error) {
 					}
 				{{else if (index $fieldVariant 0).IsInputFile -}}
 					case telegram.InputFile:
-					values["{{$field.Field.Key}}"] = value.GetValue()
+					values["{{$field.Field.Key}}"] = value.String()
 				{{else if (index $fieldVariant 0).IsChatId -}}
 					case telegram.ChatId:
 					values["{{$field.Field.Key}}"] = value.String()
@@ -94,7 +94,7 @@ func (r *{{.Name}}) GetValues() (values map[string]interface{}, err error) {
 					values["{{$field.Field.Key}}"] = "0"
 				}
 			{{else if $field.IsInputFile -}}
-				values["{{$field.Field.Key}}"] = r.{{$field.Name}}.GetValue()
+				values["{{$field.Field.Key}}"] = r.{{$field.Name}}.String()
 			{{else if $field.IsChatId -}}
 				values["{{$field.Field.Key}}"] = r.{{$field.Name}}.String()
 			{{else if or $field.IsObject $field.IsArray -}}
@@ -115,8 +115,14 @@ func (r *{{.Name}}) GetValues() (values map[string]interface{}, err error) {
 }
 
 func (r *{{.Name}}) GetFiles() (files map[string]io.Reader) {
-	{{- if or (len .Files.Fields) (len .Files.Arrays) (len .Files.Subtypes) (len .Files.Variants) -}}
+	{{- if or (len .Files.DirectFields) (len .Files.Fields) (len .Files.Arrays) (len .Files.Subtypes) (len .Files.Variants) -}}
 	files = make(map[string]io.Reader)
+
+	{{range $_, $field := .Files.DirectFields -}}
+	if {{if not $field.IsRequired}}r.{{$field.Name}} != nil && {{end}}r.{{$field.Name}}.HasFile() {
+		files[r.{{$field.Name}}.GetFormFieldName()] = r.{{$field.Name}}.GetFile()
+	}
+	{{end -}}
 
 	{{range $name, $fields := .Files.Fields -}}
 		{{range $_, $field := $fields -}}
