@@ -24,6 +24,8 @@ const TemplatesDir = "templates"
 const TypesHeaderTemplate = "types_header.tmpl"
 const TypesTemplate = "types.tmpl"
 const RequestFileTemplate = "request.tmpl"
+const RequestTestTemplate = "request_test.tmpl"
+const HelpersTestTemplate = "helpers_test.tmpl"
 const TypesFile = "types.go"
 
 type TypeTemplateData struct {
@@ -190,13 +192,35 @@ func generateRequests(types Types, methods Methods) (err error) {
 		return
 	}
 
-	var tmpl *template.Template
-	if tmpl, err = template.ParseFiles(filepath.Join(TemplatesDir, RequestFileTemplate)); err != nil {
+	var helpersTmpl *template.Template
+	if helpersTmpl, err = template.ParseFiles(filepath.Join(TemplatesDir, HelpersTestTemplate)); err != nil {
+		return
+	}
+
+	var helpersFile *os.File
+	if helpersFile, err = os.Create(filepath.Join(requestsDirPath, "helpers_test.go")); err != nil {
+		return
+	}
+	//goland:noinspection GoUnhandledErrorResult
+	defer helpersFile.Close()
+	if err = helpersTmpl.ExecuteTemplate(helpersFile, HelpersTestTemplate, nil); err != nil {
+		return
+	}
+
+	var reqTmpl, testTmpl *template.Template
+	if reqTmpl, err = template.ParseFiles(filepath.Join(TemplatesDir, RequestFileTemplate)); err != nil {
+		return
+	}
+	if testTmpl, err = template.ParseFiles(filepath.Join(TemplatesDir, RequestTestTemplate)); err != nil {
 		return
 	}
 
 	for _, item := range methods {
-		if err = generateRequestFile(tmpl, types, item); err != nil {
+		if err = generateRequestFile(reqTmpl, types, item); err != nil {
+			return
+		}
+
+		if err = generateRequestTestFile(testTmpl, types, item); err != nil {
 			return
 		}
 	}
@@ -212,6 +236,31 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 	//goland:noinspection GoUnhandledErrorResult
 	defer file.Close()
 
+	data := buildRequestTemplateData(types, method)
+	if err = tmpl.ExecuteTemplate(file, RequestFileTemplate, &data); err != nil {
+		return
+	}
+
+	return
+}
+
+func generateRequestTestFile(tmpl *template.Template, types Types, method *Method) (err error) {
+	var file *os.File
+	if file, err = os.Create(filepath.Join(ApiDir, RequestsDir, strcase.ToSnake(method.Key)+"_test.go")); err != nil {
+		return
+	}
+	//goland:noinspection GoUnhandledErrorResult
+	defer file.Close()
+
+	data := buildRequestTemplateData(types, method)
+	if err = tmpl.ExecuteTemplate(file, RequestTestTemplate, &data); err != nil {
+		return
+	}
+
+	return
+}
+
+func buildRequestTemplateData(types Types, method *Method) RequestTemplateData {
 	imports := map[string]bool{
 		"io": true,
 	}
@@ -373,11 +422,7 @@ func generateRequestFile(tmpl *template.Template, types Types, method *Method) (
 	}
 	sort.Strings(data.Imports)
 
-	if err = tmpl.ExecuteTemplate(file, RequestFileTemplate, &data); err != nil {
-		return
-	}
-
-	return
+	return data
 }
 
 func getInputFileFields(fields Fields) (output []FileField) {

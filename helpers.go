@@ -1,9 +1,10 @@
 package main
 
 import (
-	"golang.org/x/net/html"
 	"strings"
 	"unicode"
+
+	"golang.org/x/net/html"
 )
 
 const InputFileType = "InputFile"
@@ -116,6 +117,11 @@ func isArrayType(t string) bool {
 func isObjectType(t string) bool {
 	if len(t) == 0 {
 		return false
+	}
+
+	// Handle package-prefixed types like "telegram.InputSticker"
+	if idx := strings.LastIndex(t, "."); idx >= 0 && idx < len(t)-1 {
+		return unicode.IsUpper(rune(t[idx+1]))
 	}
 
 	return unicode.IsUpper(rune(t[0]))

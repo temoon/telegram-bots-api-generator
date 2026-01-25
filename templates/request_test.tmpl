@@ -1,0 +1,300 @@
+package requests
+
+import (
+{{- if len .Files.DirectFields}}
+	"bytes"
+{{- end}}
+	"testing"
+	{{- $needsTelegram := false}}
+	{{- $hasRequiredInterfaceFields := false}}
+	{{- range $_, $field := .Fields}}
+		{{- if and $field.Field.IsRequired (or (eq $field.Type "interface{}") (len $field.Variants))}}{{$hasRequiredInterfaceFields = true}}{{end}}
+	{{- end}}
+	{{- if not $hasRequiredInterfaceFields}}
+		{{- range $_, $field := .Fields}}
+			{{- if and (not (len $field.Variants)) (or $field.IsInputFile $field.IsChatId)}}{{$needsTelegram = true}}{{end}}
+		{{- end}}
+	{{- end}}
+	{{- if $needsTelegram}}
+
+	"github.com/temoon/telegram-bots-api"
+	{{- end}}
+)
+
+func Test{{.Name}}_GetValues(t *testing.T) {
+	{{- if eq (len .Fields) 0}}
+	request := &{{.Name}}{}
+
+	values, err := request.GetValues()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if values != nil && len(values) != 0 {
+		t.Errorf("expected nil or empty values for request without fields")
+	}
+	{{- else}}
+	tests := []struct {
+		name     string
+		request  *{{.Name}}
+		expected map[string]string
+		wantErr  bool
+	}{
+	{{- $hasTestableRequiredFields := false}}
+	{{- $hasTestableOptionalFields := false}}
+	{{- $hasRequiredInterfaceFields := false}}
+	{{- range $_, $field := .Fields}}
+		{{- if and $field.Field.IsRequired (not (len $field.Variants)) (ne $field.Type "interface{}") (or (not $field.IsObject) $field.IsInputFile $field.IsChatId) (not $field.IsArray)}}{{$hasTestableRequiredFields = true}}{{end}}
+		{{- if and (not $field.Field.IsRequired) (not (len $field.Variants)) (or (not $field.IsObject) $field.IsInputFile $field.IsChatId) (not $field.IsArray)}}{{$hasTestableOptionalFields = true}}{{end}}
+		{{- if and $field.Field.IsRequired (or (eq $field.Type "interface{}") (len $field.Variants))}}{{$hasRequiredInterfaceFields = true}}{{end}}
+	{{- end}}
+	{{- if and $hasTestableRequiredFields (not $hasRequiredInterfaceFields)}}
+		{
+			name: "required fields only",
+			request: &{{.Name}}{
+			{{- range $_, $field := .Fields}}
+				{{- if and $field.Field.IsRequired (not (len $field.Variants)) (ne $field.Type "interface{}") (or (not $field.IsObject) $field.IsInputFile $field.IsChatId) (not $field.IsArray)}}
+					{{- if eq $field.Field.Type "string"}}
+				{{$field.Name}}: "test_{{$field.Field.Key}}",
+					{{- else if eq $field.Field.Type "int64"}}
+				{{$field.Name}}: 123,
+					{{- else if eq $field.Field.Type "float64"}}
+				{{$field.Name}}: 123.45,
+					{{- else if eq $field.Field.Type "bool"}}
+				{{$field.Name}}: true,
+					{{- else if $field.IsChatId}}
+				{{$field.Name}}: telegram.NewChatId(123456, ""),
+					{{- else if $field.IsInputFile}}
+				{{$field.Name}}: telegram.NewInputFile("file_id_123", nil, ""),
+					{{- end}}
+				{{- end}}
+			{{- end}}
+			},
+			expected: map[string]string{
+			{{- range $_, $field := .Fields}}
+				{{- if and $field.Field.IsRequired (not (len $field.Variants)) (ne $field.Type "interface{}") (or (not $field.IsObject) $field.IsInputFile $field.IsChatId) (not $field.IsArray)}}
+					{{- if eq $field.Field.Type "string"}}
+				"{{$field.Field.Key}}": "test_{{$field.Field.Key}}",
+					{{- else if eq $field.Field.Type "int64"}}
+				"{{$field.Field.Key}}": "123",
+					{{- else if eq $field.Field.Type "float64"}}
+				"{{$field.Field.Key}}": "123.45",
+					{{- else if eq $field.Field.Type "bool"}}
+				"{{$field.Field.Key}}": "1",
+					{{- else if $field.IsChatId}}
+				"{{$field.Field.Key}}": "123456",
+					{{- else if $field.IsInputFile}}
+				"{{$field.Field.Key}}": "file_id_123",
+					{{- end}}
+				{{- end}}
+			{{- end}}
+			},
+			wantErr: false,
+		},
+	{{- end}}
+	{{- if and $hasTestableOptionalFields (not $hasRequiredInterfaceFields)}}
+		{
+			name: "with optional fields",
+			request: &{{.Name}}{
+			{{- range $_, $field := .Fields}}
+				{{- if and $field.Field.IsRequired (not (len $field.Variants)) (ne $field.Type "interface{}") (not $field.IsObject) (not $field.IsArray)}}
+					{{- if eq $field.Field.Type "string"}}
+				{{$field.Name}}: "test_{{$field.Field.Key}}",
+					{{- else if eq $field.Field.Type "int64"}}
+				{{$field.Name}}: 123,
+					{{- else if eq $field.Field.Type "float64"}}
+				{{$field.Name}}: 123.45,
+					{{- else if eq $field.Field.Type "bool"}}
+				{{$field.Name}}: true,
+					{{- else if $field.IsChatId}}
+				{{$field.Name}}: telegram.NewChatId(123456, ""),
+					{{- else if $field.IsInputFile}}
+				{{$field.Name}}: telegram.NewInputFile("file_id_123", nil, ""),
+					{{- end}}
+				{{- else if and (not $field.Field.IsRequired) (not (len $field.Variants)) (or (not $field.IsObject) $field.IsInputFile $field.IsChatId) (not $field.IsArray)}}
+					{{- if eq $field.Field.Type "string"}}
+				{{$field.Name}}: ptr("test_{{$field.Field.Key}}"),
+					{{- else if eq $field.Field.Type "int64"}}
+				{{$field.Name}}: ptr(int64(456)),
+					{{- else if eq $field.Field.Type "float64"}}
+				{{$field.Name}}: ptr(456.78),
+					{{- else if eq $field.Field.Type "bool"}}
+				{{$field.Name}}: ptr(true),
+					{{- else if $field.IsChatId}}
+				{{$field.Name}}: ptr(telegram.NewChatId(789, "")),
+					{{- else if $field.IsInputFile}}
+				{{$field.Name}}: ptr(telegram.NewInputFile("file_id_456", nil, "")),
+					{{- end}}
+				{{- end}}
+			{{- end}}
+			},
+			expected: map[string]string{
+			{{- range $_, $field := .Fields}}
+				{{- if and $field.Field.IsRequired (not (len $field.Variants)) (ne $field.Type "interface{}") (not $field.IsObject) (not $field.IsArray)}}
+					{{- if eq $field.Field.Type "string"}}
+				"{{$field.Field.Key}}": "test_{{$field.Field.Key}}",
+					{{- else if eq $field.Field.Type "int64"}}
+				"{{$field.Field.Key}}": "123",
+					{{- else if eq $field.Field.Type "float64"}}
+				"{{$field.Field.Key}}": "123.45",
+					{{- else if eq $field.Field.Type "bool"}}
+				"{{$field.Field.Key}}": "1",
+					{{- else if $field.IsChatId}}
+				"{{$field.Field.Key}}": "123456",
+					{{- else if $field.IsInputFile}}
+				"{{$field.Field.Key}}": "file_id_123",
+					{{- end}}
+				{{- else if and (not $field.Field.IsRequired) (not (len $field.Variants)) (or (not $field.IsObject) $field.IsInputFile $field.IsChatId) (not $field.IsArray)}}
+					{{- if eq $field.Field.Type "string"}}
+				"{{$field.Field.Key}}": "test_{{$field.Field.Key}}",
+					{{- else if eq $field.Field.Type "int64"}}
+				"{{$field.Field.Key}}": "456",
+					{{- else if eq $field.Field.Type "float64"}}
+				"{{$field.Field.Key}}": "456.78",
+					{{- else if eq $field.Field.Type "bool"}}
+				"{{$field.Field.Key}}": "1",
+					{{- else if $field.IsChatId}}
+				"{{$field.Field.Key}}": "789",
+					{{- else if $field.IsInputFile}}
+				"{{$field.Field.Key}}": "file_id_456",
+					{{- end}}
+				{{- end}}
+			{{- end}}
+			},
+			wantErr: false,
+		},
+	{{- end}}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values, err := tt.request.GetValues()
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetValues() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			// Check that all expected fields are present
+			for key, want := range tt.expected {
+				if got, ok := values[key]; !ok {
+					t.Errorf("missing field %q", key)
+				} else if got != want {
+					t.Errorf("field %q = %q, want %q", key, got, want)
+				}
+			}
+		})
+	}
+{{- end}}
+}
+
+{{- if len .Files.DirectFields}}
+
+func Test{{.Name}}_GetFiles(t *testing.T) {
+	t.Run("with file reader", func(t *testing.T) {
+		reader := bytes.NewReader([]byte("fake file data"))
+		request := &{{.Name}}{
+		{{- range $_, $field := .Fields}}
+			{{- if and $field.Field.IsRequired (not (len $field.Variants)) (ne $field.Type "interface{}") (or (not $field.IsObject) $field.IsInputFile $field.IsChatId) (not $field.IsArray)}}
+				{{- if eq $field.Field.Type "string"}}
+			{{$field.Name}}: "test_{{$field.Field.Key}}",
+				{{- else if eq $field.Field.Type "int64"}}
+			{{$field.Name}}: 123,
+				{{- else if eq $field.Field.Type "float64"}}
+			{{$field.Name}}: 123.45,
+				{{- else if eq $field.Field.Type "bool"}}
+			{{$field.Name}}: true,
+				{{- else if $field.IsChatId}}
+			{{$field.Name}}: telegram.NewChatId(123456, ""),
+				{{- else if $field.IsInputFile}}
+			{{$field.Name}}: telegram.NewInputFile("", reader, "test.jpg"),
+				{{- end}}
+			{{- else if and (not $field.Field.IsRequired) $field.IsInputFile}}
+			{{$field.Name}}: &telegram.InputFile{},
+			{{- end}}
+		{{- end}}
+		}
+		// Set file for optional InputFile fields
+		{{- range $_, $field := .Fields}}
+			{{- if and (not $field.Field.IsRequired) $field.IsInputFile}}
+		*request.{{$field.Name}} = telegram.NewInputFile("", reader, "test.jpg")
+			{{- end}}
+		{{- end}}
+
+		files := request.GetFiles()
+
+		if len(files) == 0 {
+			t.Error("expected files to be present")
+		}
+
+		// Verify that the reader is in the files map
+		found := false
+		for _, r := range files {
+			if r == reader {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			t.Error("expected file reader to be in files map")
+		}
+	})
+
+	t.Run("with file_id", func(t *testing.T) {
+		request := &{{.Name}}{
+		{{- range $_, $field := .Fields}}
+			{{- if and $field.Field.IsRequired (not (len $field.Variants)) (ne $field.Type "interface{}") (not $field.IsObject) (not $field.IsArray)}}
+				{{- if eq $field.Field.Type "string"}}
+			{{$field.Name}}: "test_{{$field.Field.Key}}",
+				{{- else if eq $field.Field.Type "int64"}}
+			{{$field.Name}}: 123,
+				{{- else if eq $field.Field.Type "float64"}}
+			{{$field.Name}}: 123.45,
+				{{- else if eq $field.Field.Type "bool"}}
+			{{$field.Name}}: true,
+				{{- else if $field.IsChatId}}
+			{{$field.Name}}: telegram.NewChatId(123456, ""),
+				{{- else if $field.IsInputFile}}
+			{{$field.Name}}: telegram.NewInputFile("file_id_123", nil, ""),
+				{{- end}}
+			{{- end}}
+		{{- end}}
+		}
+
+		files := request.GetFiles()
+
+		if len(files) != 0 {
+			t.Errorf("expected 0 files when using file_id, got %d", len(files))
+		}
+	})
+}
+{{- else}}
+
+func Test{{.Name}}_GetFiles(t *testing.T) {
+	request := &{{.Name}}{
+	{{- range $_, $field := .Fields}}
+		{{- if and $field.Field.IsRequired (not (len $field.Variants)) (ne $field.Type "interface{}") (not $field.IsObject) (not $field.IsArray)}}
+			{{- if eq $field.Field.Type "string"}}
+		{{$field.Name}}: "test_{{$field.Field.Key}}",
+			{{- else if eq $field.Field.Type "int64"}}
+		{{$field.Name}}: 123,
+			{{- else if eq $field.Field.Type "float64"}}
+		{{$field.Name}}: 123.45,
+			{{- else if eq $field.Field.Type "bool"}}
+		{{$field.Name}}: true,
+			{{- else if $field.IsChatId}}
+		{{$field.Name}}: telegram.NewChatId(123456, ""),
+			{{- end}}
+		{{- end}}
+	{{- end}}
+	}
+
+	files := request.GetFiles()
+
+	if files != nil && len(files) != 0 {
+		t.Errorf("expected nil or empty files for request without file fields")
+	}
+}
+{{- end}}
