@@ -5,16 +5,17 @@ package main
 //go:generate gofmt -w api/requests
 
 import (
-	"github.com/iancoleman/strcase"
-	"golang.org/x/net/html"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/iancoleman/strcase"
+	"golang.org/x/net/html"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 const ApiDir = "api"
@@ -24,19 +25,6 @@ const TypesHeaderTemplate = "types_header.tmpl"
 const TypesTemplate = "types.tmpl"
 const RequestFileTemplate = "request.tmpl"
 const TypesFile = "types.go"
-
-//type TelegramType struct {
-//	Type   *Type
-//	Fields []TelegramTypeField
-//}
-
-//type TelegramTypeField struct {
-//	Field      *Field
-//	Key        string
-//	Name       string
-//	Type       string
-//	IsRequired bool
-//}
 
 type TypeTemplateData struct {
 	Type   *Type

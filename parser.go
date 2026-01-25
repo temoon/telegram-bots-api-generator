@@ -2,13 +2,14 @@ package main
 
 import (
 	"errors"
-	"golang.org/x/net/html"
 	"log"
 	"net/http"
 	"regexp"
 	"sort"
 	"strings"
 	"unicode"
+
+	"golang.org/x/net/html"
 )
 
 const TelegramBotsApiUrl = "https://core.telegram.org/bots/api"
